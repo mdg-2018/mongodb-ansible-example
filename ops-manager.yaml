@@ -1,0 +1,83 @@
+- hosts: dbservers
+  become: yes
+  vars:
+    mmsGroupId: GroupIdHere
+    mmsApiKey: ApiKeyHere
+    mmsBaseUrl: BaseUrlHere
+  tasks:
+    - name: Enable universe repo
+      command: add-apt-repository universe
+    - name: Update all packages to the latest version
+      apt:
+        upgrade: dist
+        update_cache: yes
+    - name: Install MongoDB Enterprise dependencies
+      apt:
+        pkg: 
+          - libcurl4
+          - libgssapi-krb5-2
+          - libkrb5-dbg
+          - libldap-2.4-2
+          - libpci3
+          - libsasl2-2
+          - snmp
+          - openssl
+          - hugepages
+    - name: Disable THP
+      command: hugeadm --thp-never
+    - name: Install agent from cloud manager.
+      apt:
+        deb: "{{ mmsBaseUrl }}/download/agent/automation/mongodb-mms-automation-agent-manager_10.2.19.5989-1_amd64.ubuntu1604.deb"
+    - name: Write mongo config files
+      template:
+        src: automation-agent.j2
+        dest: /etc/mongodb-mms/automation-agent.config
+        mode: '0644'
+    - name: Create data directory
+      file:
+        path: /data
+        state: directory
+    - name: Create a new primary partition
+      parted:
+        device: /dev/sdb
+        number: 1
+        flags: [ lvm ]
+        state: present
+    - name: Create volume group for MongoDB data volume
+      lvg:
+        vg: mdb-vg
+        pvs: /dev/sdb1
+        state: present
+    - name: Create logical volume for MongoDB data volume
+      lvol:
+        vg: mdb-vg
+        lv: mdb-lv
+        state: present
+        shrink: no
+        size: 8G
+    - name: Create xfs filesystem
+      filesystem:
+        fstype: xfs
+        dev: /dev/mdb-vg/mdb-lv
+    - name: Mount MongoDB data directory
+      mount:
+        path: /data
+        src: /dev/mdb-vg/mdb-lv
+        fstype: xfs
+        state: mounted
+    - name: Change owner of MongoDB data directory
+      file:
+        path: /data
+        owner: mongodb
+        group: mongodb
+    - name: Start and enable automation agent
+      systemd:
+        state: started
+        name: mongodb-mms-automation-agent
+        enabled: yes
+    - name: Restart automation agent
+      systemd:
+        state: restarted
+        name: mongodb-mms-automation-agent
+    
+ 
